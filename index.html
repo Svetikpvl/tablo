@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/7.12.1/polyfill.min.js"></script>
     <meta charset="UTF-8">
     <title>Онлайн-расписание | Дворец школьников</title>
     <style>
@@ -131,185 +132,157 @@
 </div>
 
 <script>
-    const webAppUrl = 'https://script.google.com/macros/s/AKfycbyf4XWP-ZoXe3qqE7D5UeljgfCZxIXYLWGAu8pS8u7wAo1n-x_Oe0M5Vz3vXfnjiIzx/exec'; 
+   const webAppUrl = 'https://script.google.com/macros/s/AKfycbyf4XWP-ZoXe3qqE7D5UeljgfCZxIXYLWGAu8pS8u7wAo1n-x_Oe0M5Vz3vXfnjiIzx/exec';
+let scheduleData = [];
+window.currentPage = 0; // Глобальный счетчик страниц для пагинации
 
-    let scheduleData = [];
-    window.currentPage = 0; // Глобальный счетчик страниц для пагинации
-
-    function getTodayName() {
-        const days = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
-        return days[new Date().getDay()];
+function getTodayName() {
+  const days = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+  return days[new Date().getDay()];
+}
+function formatTimeString(timeVal) {
+  if (!timeVal) return '00:00';
+  let str = timeVal.toString().trim();
+  if (str.includes('T')) {
+    let timePart = str.split('T')[1];
+    if (timePart) {
+      let parts = timePart.split(':');
+      if (parts.length >= 2) {
+        return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
+      }
     }
-
-    function formatTimeString(timeVal) {
-        if (!timeVal) return '00:00';
-        let str = timeVal.toString().trim();
-
-        if (str.includes('T')) {
-            let timePart = str.split('T')[1];
-            if (timePart) {
-                let parts = timePart.split(':');
-                if (parts.length >= 2) {
-                    return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
-                }
-            }
-        }
-
-        let parts = str.split(':');
-        if (parts.length >= 2) {
-            return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
-        }
-
-        return str;
+  }
+  let parts = str.split(':');
+  if (parts.length >= 2) {
+    return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
+  }
+  return str;
+}
+function timeToMinutes(timeStr) {
+  let parts = timeStr.split(':');
+  return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
+function updateBoard() {
+  try {
+    const now = new Date();
+    document.getElementById('current-time').innerText = now.toTimeString().split(' ')[0];
+    const options = {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    };
+    document.getElementById('current-date').innerText = now.toLocaleDateString('ru-RU', options);
+    const currentDayName = getTodayName();
+    const currentTimeStr = now.toTimeString().substring(0, 5);
+    const listContainer = document.getElementById('schedule-list');
+    if (!listContainer) return;
+    if (scheduleData.length === 0) {
+      return;
     }
-
-    function timeToMinutes(timeStr) {
-        let parts = timeStr.split(':');
-        return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    let todaysClasses = scheduleData.filter(function (item) {
+      return item.day && item.day.toString().trim().toLowerCase() === currentDayName.toLowerCase();
+    });
+    if (todaysClasses.length === 0) {
+      listContainer.innerHTML = '<div class="info-message">На сегодня (' + currentDayName + ') занятий по расписанию нет</div>';
+      return;
     }
+    todaysClasses.forEach(function (item) {
+      item.normStart = formatTimeString(item.start);
+      item.normEnd = formatTimeString(item.end);
+    });
+    const currentMinutes = timeToMinutes(currentTimeStr);
+    const PAST_DISPLAY_LIMIT_MINUTES = 10; // Сколько минут показывать после завершения
+    const UPCOMING_DISPLAY_LIMIT_MINUTES = 10; // За сколько минут ДО начала показывать будущий урок
 
-    function updateBoard() {
-        try {
-            const now = new Date();
-            
-            document.getElementById('current-time').innerText = now.toTimeString().split(' ')[0];
-            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-            document.getElementById('current-date').innerText = now.toLocaleDateString('ru-RU', options);
+    // Фильтруем: оставляем только те, которые идут прямо сейчас, 
+    // завершились не более 10 минут назад, ИЛИ начнутся в ближайшие 10 минут
+    todaysClasses = todaysClasses.filter(function (item) {
+      let startMinutes = timeToMinutes(item.normStart);
+      let endMinutes = timeToMinutes(item.normEnd);
 
-            const currentDayName = getTodayName();
-            const currentTimeStr = now.toTimeString().substring(0, 5);
+      // Если урок уже завершился более чем 10 минут назад — скрываем
+      if (currentMinutes > endMinutes + PAST_DISPLAY_LIMIT_MINUTES) {
+        return false;
+      }
 
-            const listContainer = document.getElementById('schedule-list');
-            if (!listContainer) return;
+      // Если урок еще не начался, но до него больше 10 минут — скрываем
+      if (currentMinutes < startMinutes && startMinutes - currentMinutes > UPCOMING_DISPLAY_LIMIT_MINUTES) {
+        return false;
+      }
+      return true;
+    });
 
-            if (scheduleData.length === 0) {
-                return;
-            }
-
-            let todaysClasses = scheduleData.filter(function(item) {
-                return item.day && item.day.toString().trim().toLowerCase() === currentDayName.toLowerCase();
-            });
-
-            if (todaysClasses.length === 0) {
-                listContainer.innerHTML = '<div class="info-message">На сегодня (' + currentDayName + ') занятий по расписанию нет</div>';
-                return;
-            }
-
-            todaysClasses.forEach(function(item) {
-                item.normStart = formatTimeString(item.start);
-                item.normEnd = formatTimeString(item.end);
-            });
-
-            const currentMinutes = timeToMinutes(currentTimeStr);
-            const PAST_DISPLAY_LIMIT_MINUTES = 10; // Сколько минут показывать после завершения
-            const UPCOMING_DISPLAY_LIMIT_MINUTES = 10; // За сколько минут ДО начала показывать будущий урок
-
-            // Фильтруем: оставляем только те, которые идут прямо сейчас, 
-            // завершились не более 10 минут назад, ИЛИ начнутся в ближайшие 10 минут
-            todaysClasses = todaysClasses.filter(function(item) {
-                let startMinutes = timeToMinutes(item.normStart);
-                let endMinutes = timeToMinutes(item.normEnd);
-
-                // Если урок уже завершился более чем 10 минут назад — скрываем
-                if (currentMinutes > endMinutes + PAST_DISPLAY_LIMIT_MINUTES) {
-                    return false;
-                }
-
-                // Если урок еще не начался, но до него больше 10 минут — скрываем
-                if (currentMinutes < startMinutes && (startMinutes - currentMinutes) > UPCOMING_DISPLAY_LIMIT_MINUTES) {
-                    return false;
-                }
-
-                return true;
-            });
-
-            // Настройка постраничного вывола (по 5 элементов на экран)
-            const ITEMS_PER_PAGE = 5;
-            const totalPages = Math.ceil(todaysClasses.length / ITEMS_PER_PAGE);
-            
-            if (window.currentPage >= totalPages) {
-                window.currentPage = 0;
-            }
-
-            const startIndex = window.currentPage * ITEMS_PER_PAGE;
-            const pageClasses = todaysClasses.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-
-            let html = '';
-            pageClasses.forEach(function(item) {
-                let statusText = '';
-                let statusClass = '';
-                const start = item.normStart;
-                const end = item.normEnd;
-                
-                let startMinutes = timeToMinutes(start);
-                let endMinutes = timeToMinutes(end);
-
-                if (currentMinutes < startMinutes) {
-                    statusText = 'Скоро начнется';
-                    statusClass = 'upcoming';
-                } else if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
-                    statusText = 'Идет занятие';
-                    statusClass = 'active';
-                } else {
-                    statusText = 'Завершено';
-                    statusClass = 'passed';
-                }
-
-                html += '<div class="row">' +
-                    '<div>' +
-                        '<div class="circle-name">' + (item.title || '') + '</div>' +
-                        '<div style="font-size: 14px; color: #777788;">' + (item.group ? 'Группа: ' + item.group : '') + '</div>' +
-                    '</div>' +
-                    '<div class="teacher-info">' + (item.teacher || '—') + '</div>' +
-                    '<div class="time-slot">' + start + ' — ' + end + '</div>' +
-                    '<div><span class="status ' + statusClass + '">' + statusText + '</span></div>' +
-                    '<div class="cabinet" style="text-align: right;">' + (item.cabinet || '—') + '</div>' +
-                '</div>';
-            });
-
-            // Индикатор страниц внизу, если страниц больше одной
-            if (totalPages > 1) {
-                html += '<div style="text-align: center; color: #555566; font-size: 14px; margin-top: 10px;">Страница ' + (window.currentPage + 1) + ' из ' + totalPages + '</div>';
-            }
-
-            listContainer.innerHTML = html;
-        } catch (err) {
-            console.error("Ошибка рендеринга:", err);
-        }
+    // Настройка постраничного вывола (по 5 элементов на экран)
+    const ITEMS_PER_PAGE = 5;
+    const totalPages = Math.ceil(todaysClasses.length / ITEMS_PER_PAGE);
+    if (window.currentPage >= totalPages) {
+      window.currentPage = 0;
     }
+    const startIndex = window.currentPage * ITEMS_PER_PAGE;
+    const pageClasses = todaysClasses.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    let html = '';
+    pageClasses.forEach(function (item) {
+      let statusText = '';
+      let statusClass = '';
+      const start = item.normStart;
+      const end = item.normEnd;
+      let startMinutes = timeToMinutes(start);
+      let endMinutes = timeToMinutes(end);
+      if (currentMinutes < startMinutes) {
+        statusText = 'Скоро начнется';
+        statusClass = 'upcoming';
+      } else if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
+        statusText = 'Идет занятие';
+        statusClass = 'active';
+      } else {
+        statusText = 'Завершено';
+        statusClass = 'passed';
+      }
+      html += '<div class="row">' + '<div>' + '<div class="circle-name">' + (item.title || '') + '</div>' + '<div style="font-size: 14px; color: #777788;">' + (item.group ? 'Группа: ' + item.group : '') + '</div>' + '</div>' + '<div class="teacher-info">' + (item.teacher || '—') + '</div>' + '<div class="time-slot">' + start + ' — ' + end + '</div>' + '<div><span class="status ' + statusClass + '">' + statusText + '</span></div>' + '<div class="cabinet" style="text-align: right;">' + (item.cabinet || '—') + '</div>' + '</div>';
+    });
 
-    async function fetchScheduleFromCloud() {
-        try {
-            const response = await fetch(webAppUrl + '?t=' + new Date().getTime());
-            const data = await response.json();
-            if (Array.isArray(data) && data.length > 0) {
-                scheduleData = data;
-                document.getElementById('sync-status').innerText = 'Статус: Данные успешно загружены из Google Таблицы';
-                updateBoard();
-            } else {
-                document.getElementById('sync-status').innerText = 'Статус: Таблица пуста или неверный формат';
-            }
-        } catch (error) {
-            console.error('Ошибка загрузки из облака:', error);
-            document.getElementById('sync-status').innerText = 'Статус: Ошибка соединения с таблицей';
-        }
+    // Индикатор страниц внизу, если страниц больше одной
+    if (totalPages > 1) {
+      html += '<div style="text-align: center; color: #555566; font-size: 14px; margin-top: 10px;">Страница ' + (window.currentPage + 1) + ' из ' + totalPages + '</div>';
     }
+    listContainer.innerHTML = html;
+  } catch (err) {
+    console.error("Ошибка рендеринга:", err);
+  }
+}
+async function fetchScheduleFromCloud() {
+  try {
+    const response = await fetch(webAppUrl + '?t=' + new Date().getTime());
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      scheduleData = data;
+      document.getElementById('sync-status').innerText = 'Статус: Данные успешно загружены из Google Таблицы';
+      updateBoard();
+    } else {
+      document.getElementById('sync-status').innerText = 'Статус: Таблица пуста или неверный формат';
+    }
+  } catch (error) {
+    console.error('Ошибка загрузки из облака:', error);
+    document.getElementById('sync-status').innerText = 'Статус: Ошибка соединения с таблицей';
+  }
+}
 
-    // Запускаем часы каждую секунду
-    setInterval(updateBoard, 1000);
+// Запускаем часы каждую секунду
+setInterval(updateBoard, 1000);
+updateBoard();
+
+// Автоматическое перелистывание страниц каждые 12 секунд
+setInterval(function () {
+  if (scheduleData.length > 0) {
+    window.currentPage++;
     updateBoard();
+  }
+}, 12000);
 
-    // Автоматическое перелистывание страниц каждые 12 секунд
-    setInterval(function() {
-        if (scheduleData.length > 0) {
-            window.currentPage++;
-            updateBoard();
-        }
-    }, 12000);
-
-    // Запрашиваем данные из Google Таблицы сразу и каждые 5 минут
-    fetchScheduleFromCloud();
-    setInterval(fetchScheduleFromCloud, 5 * 60 * 1000);
+// Запрашиваем данные из Google Таблицы сразу и каждые 5 минут
+fetchScheduleFromCloud();
+setInterval(fetchScheduleFromCloud, 5 * 60 * 1000);
 </script>
 
 </body>
